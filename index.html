@@ -249,44 +249,19 @@ const chatMessages = document.getElementById('chatMessages');
 const userInput = document.getElementById('userInput');
 let uploadedImageBase64 = null;
 
-// Load history from users.json
+// Load chat history from localStorage
 window.onload = () => {
-  fetch("users.json")
-    .then(res => res.json())
-    .then(history => {
-      history.forEach(msg => {
-        appendMessage(msg.sender, msg.content, msg.isImage);
-      });
-    })
-    .catch(() => {
-      console.warn("Could not load users.json");
-    });
+  const history = JSON.parse(localStorage.getItem("chatHistory")) || [];
+  history.forEach(msg => {
+    appendMessage(msg.sender, msg.content, msg.isImage);
+  });
 };
 
 function saveToHistory(sender, content, isImage = false) {
-  fetch("users.json")
-    .then(res => res.json())
-    .then(history => {
-      history.push({ sender, content, isImage, timestamp: new Date().toISOString() });
-      if (history.length > 20) history.shift();
-      const blob = new Blob([JSON.stringify(history, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-
-      // Simulate download to "update" users.json locally (can't write real file without backend)
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "users.json";
-      a.click();
-    })
-    .catch(() => {
-      const fallback = [{ sender, content, isImage }];
-      const blob = new Blob([JSON.stringify(fallback, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "users.json";
-      a.click();
-    });
+  let history = JSON.parse(localStorage.getItem("chatHistory")) || [];
+  history.push({ sender, content, isImage });
+  if (history.length > 20) history.shift();
+  localStorage.setItem("chatHistory", JSON.stringify(history));
 }
 
 function appendMessage(sender, content, isImage = false) {
@@ -328,6 +303,7 @@ function appendMessage(sender, content, isImage = false) {
 
   chatMessages.appendChild(msgDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  saveToHistory(sender, content, isImage);
 }
 
 function showTypingIndicator() {
@@ -359,6 +335,7 @@ async function sendMessage() {
   if (!userText && !uploadedImageBase64) return;
 
   appendMessage('user', userText);
+  saveToHistory('user', userText);
   userInput.value = '';
   showTypingIndicator();
 
