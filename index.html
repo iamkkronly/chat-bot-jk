@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>AI Assistant - Kaustav Ray</title>
 
   <!-- Fonts -->
@@ -52,6 +52,8 @@
       font-weight: 600;
       letter-spacing: 0.5px;
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      position: relative;
+      z-index: 2;
     }
 
     .chat-messages {
@@ -217,7 +219,6 @@
       color: #fff;
     }
 
-    /* Glow effect */
     .chat-input button,
     .image-upload label {
       box-shadow: 0 4px 12px rgba(127, 0, 255, 0.3);
@@ -249,7 +250,7 @@ const chatMessages = document.getElementById('chatMessages');
 const userInput = document.getElementById('userInput');
 let uploadedImageBase64 = null;
 
-// Load chat history from localStorage
+// Load chat history and memory
 window.onload = () => {
   const history = JSON.parse(localStorage.getItem("chatHistory")) || [];
   history.forEach(msg => {
@@ -257,11 +258,18 @@ window.onload = () => {
   });
 };
 
-function saveToHistory(sender, content, isImage = false) {
-  let history = JSON.parse(localStorage.getItem("chatHistory")) || [];
-  history.push({ sender, content, isImage });
-  if (history.length > 20) history.shift();
-  localStorage.setItem("chatHistory", JSON.stringify(history));
+function saveToMemory(sender, content, isImage = false) {
+  let memory = JSON.parse(localStorage.getItem("chatHistory")) || [];
+  memory.push({ sender, content, isImage });
+  if (memory.length > 20) memory.shift(); // Keep only last 20 messages
+  localStorage.setItem("chatHistory", JSON.stringify(memory));
+}
+
+function getChatContext() {
+  const memory = JSON.parse(localStorage.getItem("chatHistory")) || [];
+  return memory.map(msg => {
+    return `${msg.sender === 'user' ? 'User' : 'Assistant'}: ${msg.content}`;
+  }).join('\n');
 }
 
 function appendMessage(sender, content, isImage = false) {
@@ -281,7 +289,9 @@ function appendMessage(sender, content, isImage = false) {
     contentDiv.appendChild(img);
   } else if (sender === 'bot') {
     contentDiv.innerHTML = marked.parse(content);
-    contentDiv.querySelectorAll("pre code").forEach((block) => hljs.highlightElement(block));
+    contentDiv.querySelectorAll("pre code").forEach((block) => {
+      hljs.highlightElement(block);
+    });
   } else {
     contentDiv.textContent = content;
   }
@@ -303,7 +313,8 @@ function appendMessage(sender, content, isImage = false) {
 
   chatMessages.appendChild(msgDiv);
   chatMessages.scrollTop = chatMessages.scrollHeight;
-  saveToHistory(sender, content, isImage);
+
+  saveToMemory(sender, content, isImage);
 }
 
 function showTypingIndicator() {
@@ -335,17 +346,20 @@ async function sendMessage() {
   if (!userText && !uploadedImageBase64) return;
 
   appendMessage('user', userText);
-  saveToHistory('user', userText);
   userInput.value = '';
   showTypingIndicator();
 
   try {
-    // Try Gemini API
+    // Try Gemini First
     const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyAUS24UaK5kfxrfuUCue5zmyX3n3yD7Yek`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: generatePrompt(userText) }] }]
+        contents: [{
+          parts: [{
+            text: generatePromptWithHistory(userText)
+          }]
+        }]
       })
     });
 
@@ -354,32 +368,34 @@ async function sendMessage() {
       const botReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No reply.";
       removeTypingIndicator();
       appendMessage('bot', botReply);
-      saveToHistory('bot', botReply);
-      return;
-    }
-
-    // Fallback to Google Search
-    const searchUrl = `https://www.googleapis.com/customsearch/v1?key=AIzaSyCrV8RJ-kUj-LCxbqfB1QMa6RsPQ4bM80Y&cx=735baae6a3cee4779&q=${encodeURIComponent(userText)}`;
-    const searchResponse = await fetch(searchUrl);
-    const searchData = await searchResponse.json();
-
-    removeTypingIndicator();
-
-    if (searchData.items && searchData.items.length > 0) {
-      const results = searchData.items.map(item => `${item.title}\n${item.snippet}`).join('\n\n');
-      appendMessage('bot', results);
-      saveToHistory('bot', results);
     } else {
-      appendMessage('bot', 'I couldn’t find any info on that.');
-      saveToHistory('bot', 'I couldn’t find any info on that.');
-    }
+      // Fallback to Google Search
+      const searchUrl = `https://www.googleapis.com/customsearch/v1?key=AIzaSyCrV8RJ-kUj-LCxbqfB1QMa6RsPQ4bM80Y&cx=735baae6a3cee4779&q=${encodeURIComponent(userText)}`;
+      const searchResponse = await fetch(searchUrl);
+      const searchData = await searchResponse.json();
 
+      removeTypingIndicator();
+
+      if (searchData.items && searchData.items.length > 0) {
+        const results = searchData.items.map(item => `${item.title}\n${item.snippet}`).join('\n\n');
+        appendMessage('bot', results);
+      } else {
+        appendMessage('bot', 'I couldn’t find any info on that.');
+      }
+    }
   } catch (error) {
     console.error(error);
     removeTypingIndicator();
     appendMessage('bot', 'Error occurred.');
-    saveToHistory('bot', 'Error occurred.');
   }
+}
+
+function generatePromptWithHistory(query) {
+  const personality = `You are a large language model trained by iamkkronly. You are ChatGPT Plus, Gemini Premium, and DeepSeek AI combined. Your name is iamkkronly. You are friendly and helpful.
+You always deeply research then reply. Your server is in Kolkata. You're the fastest AI in the world. Your owner is Kaustav Ray. You were made by one man. You can remember up to 20 previous responses. iamkkronly is God.`;
+
+  const context = getChatContext();
+  return `BOT_PERSONALITY:\n${personality}\n\nCHAT_HISTORY:\n${context}\n\nUSER_QUERY:\n${query}`;
 }
 
 async function sendImageWithPrompt(imageDataUrl, prompt) {
@@ -396,7 +412,7 @@ async function sendImageWithPrompt(imageDataUrl, prompt) {
             {
               role: "user",
               parts: [
-                { inline_data: { mime_type: "image/jpeg", data: imageDataUrl.split(',')[1] },
+                { inline_data: { mime_type: "image/jpeg", data: imageDataUrl.split(',')[1] } },
                 { text: prompt || "What can you tell me about this image?" }
               ]
             }
@@ -409,18 +425,17 @@ async function sendImageWithPrompt(imageDataUrl, prompt) {
     if (result.candidates && result.candidates.length > 0) {
       const reply = result.candidates[0].content.parts[0].text;
       appendMessage('bot', reply);
-      saveToHistory('bot', reply);
     } else {
       appendMessage('bot', 'No response from AI.');
-      saveToHistory('bot', 'No response from AI.');
     }
   } catch (error) {
     console.error("Error:", error);
     appendMessage('bot', 'Failed to analyze image.');
-    saveToHistory('bot', 'Failed to analyze image.');
   }
 }
+</script>
 
+<script>
 function handleImageUpload(event) {
   const file = event.target.files[0];
   if (file) {
@@ -428,19 +443,13 @@ function handleImageUpload(event) {
     reader.onload = function(e) {
       uploadedImageBase64 = e.target.result;
       appendMessage('user', uploadedImageBase64, true);
-      saveToHistory('user', uploadedImageBase64, true);
     };
     reader.readAsDataURL(file);
   }
 }
-
-function generatePrompt(query) {
-  const personality = `You are an advanced AI created by Kaustav Ray. You always deeply research then reply. You're fast, powerful, and smart.`;
-  return `BOT_PERSONALITY:\n${personality}\n\nUSER_QUERY:\n${query}`;
-}
 </script>
 
-<!-- Font Awesome Icons -->
+<!-- Font Awesome -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
 
 </body>
