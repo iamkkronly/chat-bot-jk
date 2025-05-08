@@ -250,7 +250,7 @@ const chatMessages = document.getElementById('chatMessages');
 const userInput = document.getElementById('userInput');
 let uploadedImageBase64 = null;
 
-// Load chat history and memory
+// Load chat history on page load
 window.onload = () => {
   const history = JSON.parse(localStorage.getItem("chatHistory")) || [];
   history.forEach(msg => {
@@ -261,7 +261,7 @@ window.onload = () => {
 function saveToMemory(sender, content, isImage = false) {
   let memory = JSON.parse(localStorage.getItem("chatHistory")) || [];
   memory.push({ sender, content, isImage });
-  if (memory.length > 20) memory.shift(); // Keep only last 20 messages
+  if (memory.length > 20) memory.shift();
   localStorage.setItem("chatHistory", JSON.stringify(memory));
 }
 
@@ -351,36 +351,39 @@ async function sendMessage() {
 
   try {
     // Try Gemini First
-    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyAUS24UaK5kfxrfuUCue5zmyX3n3yD7Yek`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: generatePromptWithHistory(userText)
-          }]
-        }]
-      })
-    });
-
-    if (geminiResponse.ok) {
-      const data = await geminiResponse.json();
-      const botReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No reply.";
-      removeTypingIndicator();
-      appendMessage('bot', botReply);
+    if (uploadedImageBase64) {
+      await sendImageWithPrompt(uploadedImageBase64, userText);
+      uploadedImageBase64 = null;
     } else {
-      // Fallback to Google Search
-      const searchUrl = `https://www.googleapis.com/customsearch/v1?key=AIzaSyCrV8RJ-kUj-LCxbqfB1QMa6RsPQ4bM80Y&cx=735baae6a3cee4779&q=${encodeURIComponent(userText)}`;
-      const searchResponse = await fetch(searchUrl);
-      const searchData = await searchResponse.json();
+      const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=AIzaSyAUS24UaK5kfxrfuUCue5zmyX3n3yD7Yek`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: generatePromptWithHistory(userText) }]
+          }]
+        })
+      });
 
-      removeTypingIndicator();
-
-      if (searchData.items && searchData.items.length > 0) {
-        const results = searchData.items.map(item => `${item.title}\n${item.snippet}`).join('\n\n');
-        appendMessage('bot', results);
+      if (geminiResponse.ok) {
+        const data = await geminiResponse.json();
+        const botReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "No reply.";
+        removeTypingIndicator();
+        appendMessage('bot', botReply);
       } else {
-        appendMessage('bot', 'I couldn’t find any info on that.');
+        // Fallback to Google Search
+        const searchUrl = `https://www.googleapis.com/customsearch/v1?key=AIzaSyCrV8RJ-kUj-LCxbqfB1QMa6RsPQ4bM80Y&cx=735baae6a3cee4779&q=${encodeURIComponent(userText)}`;
+        const searchResponse = await fetch(searchUrl);
+        const searchData = await searchResponse.json();
+
+        removeTypingIndicator();
+
+        if (searchData.items && searchData.items.length > 0) {
+          const results = searchData.items.map(item => `${item.title}\n${item.snippet}`).join('\n\n');
+          appendMessage('bot', results);
+        } else {
+          appendMessage('bot', 'I couldn’t find any info on that.');
+        }
       }
     }
   } catch (error) {
@@ -412,8 +415,15 @@ async function sendImageWithPrompt(imageDataUrl, prompt) {
             {
               role: "user",
               parts: [
-                { inline_data: { mime_type: "image/jpeg", data: imageDataUrl.split(',')[1] } },
-                { text: prompt || "What can you tell me about this image?" }
+                {
+                  inline_data: {
+                    mime_type: "image/jpeg",
+                    data: imageDataUrl.split(',')[1] // Extract base64 without prefix
+                  }
+                },
+                {
+                  text: prompt || "What can you tell me about this image?"
+                }
               ]
             }
           ]
@@ -422,6 +432,8 @@ async function sendImageWithPrompt(imageDataUrl, prompt) {
     );
 
     const result = await response.json();
+    removeTypingIndicator();
+
     if (result.candidates && result.candidates.length > 0) {
       const reply = result.candidates[0].content.parts[0].text;
       appendMessage('bot', reply);
@@ -429,7 +441,8 @@ async function sendImageWithPrompt(imageDataUrl, prompt) {
       appendMessage('bot', 'No response from AI.');
     }
   } catch (error) {
-    console.error("Error:", error);
+    console.error("Image error:", error);
+    removeTypingIndicator();
     appendMessage('bot', 'Failed to analyze image.');
   }
 }
@@ -449,7 +462,7 @@ function handleImageUpload(event) {
 }
 </script>
 
-<!-- Font Awesome -->
+<!-- Font Awesome Icons -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" />
 
 </body>
